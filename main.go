@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"mime/multipart"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -14,8 +13,8 @@ import (
 
 const deftPath = "."
 
-func getFileName(header *multipart.FileHeader) string {
-	name := filepath.Base(header.Filename)
+func getFileName(filename string) string {
+	name := filepath.Base(filename)
 
 	name = strings.TrimSuffix(name, filepath.Ext(name))
 
@@ -33,9 +32,6 @@ var mimeExtMap = map[string]string{
 }
 
 func getFileExt(buf []byte) (string, error) {
-	if len(buf) < fileExtSize {
-		return "", io.EOF
-	}
 	mimeType := http.DetectContentType(buf)
 	ext, ok := mimeExtMap[mimeType]
 	if !ok {
@@ -54,7 +50,7 @@ func handleUploadStream(res http.ResponseWriter, req *http.Request) {
 	for {
 		part, err := mr.NextPart()
 		if err == io.EOF {
-			http.Error(res, err.Error(), http.StatusBadRequest)
+			_, _ = res.Write([]byte("upload ok"))
 			return
 		}
 		if err != nil {
@@ -62,17 +58,53 @@ func handleUploadStream(res http.ResponseWriter, req *http.Request) {
 			return
 		}
 		if part.FormName() != "avatar" {
-			err := part.Close()
-			if err != nil {
-				http.Error(res, err.Error(), http.StatusBadRequest)
-				return
-			}
+			_ = part.Close()
 			continue
 		}
+
+		head := make([]byte, fileExtSize)
+		n, err := part.Read(head)
+		if err != nil && err != io.EOF {
+			_ = part.Close()
+			http.Error(res, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		fileExt, err := getFileExt(head[:n])
+		if err != nil {
+			_ = part.Close()
+			http.Error(res, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		fileName := getFileName(part.FileName())
+
+		filePath := setFilePath("", fileName, fileExt)
+
+		dst, err := os.Create(filePath)
+		if err != nil {
+			http.Error(res, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		_, err = dst.Write(head[:n])
+		if err != nil {
+			http.Error(res, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		if _, err := io.Copy(dst, part); err != nil {
+			http.Error(res, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		_, err = res.Write([]byte("upload ok"))
+		if err != nil {
+			slog.Error("res send fail", "err", err.Error())
+		}
+		_ = dst.Close()
+		_ = part.Close()
+		return
 	}
-	//defer part.Close()
-	//ext, err := getFileExt(part)
-	slog.Info("stream ext", "ext", ext)
 }
 func handleUpload(res http.ResponseWriter, req *http.Request) {
 	slog.Info("method path", "method", req.Method, "path", req.URL.Path)
@@ -88,12 +120,23 @@ func handleUpload(res http.ResponseWriter, req *http.Request) {
 		}
 	}()
 
-	fileName := getFileName(header)
+	fileName := getFileName(header.Filename)
 	buf := make([]byte, fileExtSize)
-	_, err = file.Read(buf)
-	file.Seek()
-	fileExt, err := getFileExt(buf)
+	n, err := file.Read(buf)
 	if err != nil {
+		slog.Error("file read fail", "err", err.Error())
+		http.Error(res, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	fileExt, err := getFileExt(buf[:n])
+	if err != nil {
+		http.Error(res, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if _, err = file.Seek(0, io.SeekStart); err != nil {
+		slog.Error("file seek fail", "err", err.Error())
 		http.Error(res, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -138,6 +181,7 @@ func main() {
 	http.HandleFunc("/upload", handleUploadStream)
 	err := http.ListenAndServe(":80", nil)
 	if err != nil {
+		slog.Error("http listen err", "err", err.Error())
 		panic("start server panic")
 	}
 }
