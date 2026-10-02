@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>头像上传</title>
+</head>
+<body>
+<form action="http://localhost/upload" method="post" enctype="multipart/form-data">
+    <label for="avatar">选择头像：</label>
+    <input type="file"
+           name="avatar"
+           id="avatar"
+           accept="image/png,image/jpeg,image/gif"
+           required>
+    <button type="submit">上传</button>
+</form>
+</body>
+</html>
