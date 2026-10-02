@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-const deftPath = "."
+const deftPath = "./uploads"
 
 func getFileName(filename string) string {
 	name := filepath.Base(filename)
