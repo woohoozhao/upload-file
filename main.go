@@ -118,7 +118,6 @@ func handleUpload(res http.ResponseWriter, req *http.Request) {
 		http.Error(res, err.Error(), http.StatusBadRequest)
 		return
 	}
-
 	filePath := setFilePath("", fileName, fileExt)
 	slog.Info(filePath)
 
@@ -153,9 +152,10 @@ func main() {
 	}
 	//http.HandleFunc("/upload", handleUpload)
 	http.HandleFunc("/upload", handleUploadStream)
-	err := http.ListenAndServe(":80", nil)
+	err := http.ListenAndServe(":8080", nil)
 	if err != nil {
-		slog.Error("http listen err", "err", err.Error())
+		slog.Error("http listen err", "err", err)
 		panic("start server panic")
 	}
+
 }
