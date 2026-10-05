@@ -1,45 +1,14 @@
 package main
 
 import (
-	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"os"
-	"path/filepath"
-	"strings"
-	"time"
 )
-
-const deftPath = "./uploads"
-
-func getFileName(filename string) string {
-	name := filepath.Base(filename)
-
-	name = strings.TrimSuffix(name, filepath.Ext(name))
-
-	if name == "" || name == "." || name == "/" {
-		return "default"
-	}
-
-	return name
-}
 
 const fileExtSize = 512
 
-var mimeExtMap = map[string]string{
-	"image/jpeg": ".jpg",
-}
-
-func getFileExt(buf []byte) (string, error) {
-	mimeType := http.DetectContentType(buf)
-	ext, ok := mimeExtMap[mimeType]
-	if !ok {
-		return "", fmt.Errorf("unknown mime type: %s", mimeType)
-	}
-
-	return ext, nil
-}
 func handleUploadStream(res http.ResponseWriter, req *http.Request) {
 	mr, err := req.MultipartReader()
 	if err != nil {
@@ -55,6 +24,7 @@ func handleUploadStream(res http.ResponseWriter, req *http.Request) {
 		}
 		if err != nil {
 			http.Error(res, err.Error(), http.StatusBadRequest)
+			_ = part.Close()
 			return
 		}
 		if part.FormName() != "avatar" {
@@ -73,7 +43,7 @@ func handleUploadStream(res http.ResponseWriter, req *http.Request) {
 		fileExt, err := getFileExt(head[:n])
 		if err != nil {
 			_ = part.Close()
-			http.Error(res, err.Error(), http.StatusBadRequest)
+			http.Error(res, err.Error(), http.StatusUnsupportedMediaType)
 			return
 		}
 
@@ -84,16 +54,24 @@ func handleUploadStream(res http.ResponseWriter, req *http.Request) {
 		dst, err := os.Create(filePath)
 		if err != nil {
 			http.Error(res, err.Error(), http.StatusInternalServerError)
+			_ = part.Close()
+			if dst != nil {
+				_ = dst.Close()
+			}
 			return
 		}
 		_, err = dst.Write(head[:n])
 		if err != nil {
 			http.Error(res, err.Error(), http.StatusInternalServerError)
+			_ = dst.Close()
+			_ = part.Close()
 			return
 		}
 
 		if _, err := io.Copy(dst, part); err != nil {
 			http.Error(res, err.Error(), http.StatusInternalServerError)
+			_ = dst.Close()
+			_ = part.Close()
 			return
 		}
 
@@ -143,6 +121,7 @@ func handleUpload(res http.ResponseWriter, req *http.Request) {
 
 	filePath := setFilePath("", fileName, fileExt)
 	slog.Info(filePath)
+
 	dst, err := os.Create(filePath)
 	if err != nil {
 		http.Error(res, err.Error(), http.StatusInternalServerError)
@@ -167,16 +146,11 @@ func handleUpload(res http.ResponseWriter, req *http.Request) {
 	}
 }
 
-func setFilePath(path, fileName, fileExt string) string {
-	if path == "" {
-		path = deftPath
-	}
-	return fmt.Sprintf("%s/%s_%d%s",
-		deftPath, fileName,
-		time.Now().Unix(), fileExt)
-}
-
 func main() {
+	if os.MkdirAll(deftPath, 0777) != nil {
+		slog.Error("mkdir fail")
+		panic("start server panic")
+	}
 	//http.HandleFunc("/upload", handleUpload)
 	http.HandleFunc("/upload", handleUploadStream)
 	err := http.ListenAndServe(":80", nil)
